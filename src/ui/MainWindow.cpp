@@ -3,32 +3,68 @@
 
 #include "settings/SettingsWindow.hpp"
 #include "config/AppSettings.hpp"
+
+#include <QColor>
 #include <QComboBox>
 #include <QDateTime>
-#include <QFileDialog>
 #include <QFileInfo>
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QMessageBox>
+#include <QPaintEvent>
+#include <QPainter>
+#include <QPixmap>
 #include <QPlainTextEdit>
 #include <QPushButton>
+#include <QSizePolicy>
 #include <QVBoxLayout>
 #include <QProcess>
 #include <QWidget>
 
 namespace {
 
+class BackgroundWidget final : public QWidget
+{
+public:
+    explicit BackgroundWidget(QWidget* parent = nullptr)
+        : QWidget(parent),
+          background_(":/images/background.png")
+    {
+        setAttribute(Qt::WA_StyledBackground, false);
+    }
+
+protected:
+    void paintEvent(QPaintEvent* event) override
+    {
+        Q_UNUSED(event);
+
+        QPainter painter(this);
+
+        if (!background_.isNull()) {
+            painter.drawPixmap(rect(), background_);
+        } else {
+            painter.fillRect(rect(), QColor("#15191E"));
+        }
+    }
+
+private:
+    QPixmap background_;
+};
+
 QString statusColor(ValidationStatus status)
 {
     switch (status) {
     case ValidationStatus::Sync:
         return QStringLiteral("#55D98A");
+
     case ValidationStatus::ExtraMods:
         return QStringLiteral("#E9B949");
+
     case ValidationStatus::NotSync:
     case ValidationStatus::ServerOffline:
     case ValidationStatus::ManifestError:
         return QStringLiteral("#FF626B");
+
     case ValidationStatus::NotChecked:
         return QStringLiteral("#A0AAB5");
     }
@@ -41,14 +77,19 @@ QString statusName(ValidationStatus status)
     switch (status) {
     case ValidationStatus::Sync:
         return QStringLiteral("SYNC");
+
     case ValidationStatus::ExtraMods:
         return QStringLiteral("EXTRA MODS");
+
     case ValidationStatus::NotSync:
         return QStringLiteral("NOT SYNC");
+
     case ValidationStatus::ServerOffline:
         return QStringLiteral("SERVER OFFLINE");
+
     case ValidationStatus::ManifestError:
         return QStringLiteral("MANIFEST ERROR");
+
     case ValidationStatus::NotChecked:
         return QStringLiteral("NOT CHECKED");
     }
@@ -59,8 +100,8 @@ QString statusName(ValidationStatus status)
 QString cardStyle()
 {
     return QStringLiteral(
-        "background-color: #20262D;"
-        "border: 1px solid #343B44;"
+        "background-color: rgba(32, 38, 45, 215);"
+        "border: 1px solid rgba(100, 115, 130, 150);"
         "border-radius: 10px;"
         "padding: 12px;"
     );
@@ -73,100 +114,165 @@ MainWindow::MainWindow(QWidget* parent)
 {
     setWindowTitle(QStringLiteral("CLI-SRV Validator"));
     resize(620, 650);
-    setMinimumSize(520, 570);
+    setMinimumSize(520, 0);
 
-    auto* central = new QWidget(this);
+    auto* central = new BackgroundWidget(this);
+    central->setObjectName("centralWidget");
+
     auto* root = new QVBoxLayout(central);
     root->setContentsMargins(22, 22, 22, 22);
     root->setSpacing(14);
+    root->setAlignment(Qt::AlignTop);
+
+    // Header
 
     auto* header = new QHBoxLayout;
 
     auto* icon = new QLabel(QStringLiteral("◆"), central);
     icon->setStyleSheet(
-        "color: #9CC7E8; font-size: 28px; font-weight: bold;"
+        "color: #9CC7E8;"
+        "font-size: 28px;"
+        "font-weight: bold;"
     );
 
     auto* heading = new QVBoxLayout;
+
     auto* title = new QLabel(
-        QStringLiteral("CLI-SRV VALIDATOR"), central
+        QStringLiteral("CLI-SRV VALIDATOR"),
+        central
     );
     title->setStyleSheet(
-        "font-size: 19px; font-weight: bold; color: #F0F3F6;"
+        "font-size: 19px;"
+        "font-weight: bold;"
+        "color: #F0F3F6;"
     );
 
     auto* subtitle = new QLabel(
-        QStringLiteral("CLIENT INTEGRITY CHECK"), central
+        QStringLiteral("CLIENT INTEGRITY CHECK"),
+        central
     );
     subtitle->setStyleSheet(
-        "font-size: 10px; color: #929DA8; letter-spacing: 2px;"
+        "font-size: 10px;"
+        "color: #929DA8;"
+        "letter-spacing: 2px;"
     );
 
     heading->addWidget(title);
     heading->addWidget(subtitle);
 
-    auto* debugBadge = new QLabel(QStringLiteral("DEBUG"), central);
-    debugBadge->setStyleSheet(
-        "color: #9CC7E8;"
-        "background: #26313A;"
-        "border-radius: 5px;"
-        "padding: 6px 10px;"
-        "font-weight: bold;"
+    modeBox_ = new QComboBox(central);
+    modeBox_->addItem(QStringLiteral("User Mode"));
+    modeBox_->addItem(QStringLiteral("Dev Mode"));
+    modeBox_->setCurrentIndex(1);
+    modeBox_->setToolTip(
+        QStringLiteral(
+            "Переключение пользовательского режима "
+            "и режима разработчика"
+        )
     );
 
     header->addWidget(icon);
     header->addLayout(heading);
     header->addStretch();
-    header->addWidget(debugBadge);
+    header->addWidget(modeBox_);
 
     root->addLayout(header);
 
+    // Client status
+
     auto* statusCaption = new QLabel(
-        QStringLiteral("CLIENT STATUS"), central
+        QStringLiteral("CLIENT STATUS"),
+        central
     );
     statusCaption->setStyleSheet(
-        "color: #929DA8; font-size: 10px; letter-spacing: 2px;"
+        "color: #929DA8;"
+        "font-size: 10px;"
+        "letter-spacing: 2px;"
     );
     root->addWidget(statusCaption);
 
     auto* statusCard = new QWidget(central);
-    statusCard->setStyleSheet(cardStyle());
+    statusCard->setStyleSheet(
+        "background-color: rgba(32, 38, 45, 215);"
+        "border: 1px solid rgba(100, 115, 130, 150);"
+        "border-radius: 8px;"
+    );
+    statusCard->setSizePolicy(
+        QSizePolicy::Expanding,
+        QSizePolicy::Fixed
+    );
+    statusCard->setFixedHeight(40);
 
     auto* statusLayout = new QVBoxLayout(statusCard);
+    statusLayout->setContentsMargins(10, 3, 10, 3);
+    statusLayout->setSpacing(0);
+
+    auto* statusHeader = new QHBoxLayout;
+    statusHeader->setSpacing(7);
+
+    statusIndicator_ = new QLabel(statusCard);
+    statusIndicator_->setFixedSize(10, 10);
+    statusIndicator_->setStyleSheet(
+        "background-color: #A0AAB5;"
+        "border-radius: 5px;"
+    );
 
     statusTitle_ = new QLabel(
-        QStringLiteral("NOT CHECKED"), statusCard
+        QStringLiteral("NOT CHECKED"),
+        statusCard
     );
     statusTitle_->setStyleSheet(
-        "color: #A0AAB5; font-size: 25px; font-weight: bold;"
+        "color: #A0AAB5;"
+        "font-size: 15px;"
+        "font-weight: bold;"
     );
 
     statusDescription_ = new QLabel(
-        QStringLiteral("Нажмите «Проверить», чтобы сверить файлы."),
+        QStringLiteral("Ожидает проверки"),
         statusCard
     );
-    statusDescription_->setWordWrap(true);
-    statusDescription_->setStyleSheet("color: #C2CBD4;");
+    statusDescription_->setWordWrap(false);
+    statusDescription_->setSizePolicy(
+        QSizePolicy::Ignored,
+        QSizePolicy::Preferred
+    );
+    statusDescription_->setStyleSheet(
+        "color: #C2CBD4;"
+        "font-size: 12px;"
+    );
 
-    statusLayout->addWidget(statusTitle_);
-    statusLayout->addWidget(statusDescription_);
+    statusHeader->addWidget(statusIndicator_);
+    statusHeader->addWidget(statusTitle_);
+    statusHeader->addWidget(statusDescription_, 1);
+
+    statusLayout->addLayout(statusHeader);
     root->addWidget(statusCard);
+
+    // Server card
 
     auto* serverCard = new QWidget(central);
     serverCard->setStyleSheet(cardStyle());
+    serverCard->setSizePolicy(
+        QSizePolicy::Expanding,
+        QSizePolicy::Fixed
+    );
 
     auto* serverLayout = new QHBoxLayout(serverCard);
 
     auto* serverInfo = new QVBoxLayout;
+
     auto* serverName = new QLabel(
-        QStringLiteral("GAME SERVER"), serverCard
+        QStringLiteral("GAME SERVER"),
+        serverCard
     );
     serverName->setStyleSheet(
-        "color: #F0F3F6; font-weight: bold;"
+        "color: #F0F3F6;"
+        "font-weight: bold;"
     );
 
     serverStatus_ = new QLabel(
-        QStringLiteral("Не проверен"), serverCard
+        QStringLiteral("Не проверен"),
+        serverCard
     );
     serverStatus_->setStyleSheet("color: #929DA8;");
 
@@ -176,16 +282,23 @@ MainWindow::MainWindow(QWidget* parent)
     auto* playersInfo = new QVBoxLayout;
     playersInfo->setAlignment(Qt::AlignRight);
 
-    playerCount_ = new QLabel(QStringLiteral("—"), serverCard);
+    playerCount_ = new QLabel(
+        QStringLiteral("—"),
+        serverCard
+    );
     playerCount_->setStyleSheet(
-        "color: #F0F3F6; font-size: 18px; font-weight: bold;"
+        "color: #F0F3F6;"
+        "font-size: 18px;"
+        "font-weight: bold;"
     );
 
     auto* playersCaption = new QLabel(
-        QStringLiteral("PLAYERS"), serverCard
+        QStringLiteral("PLAYERS"),
+        serverCard
     );
     playersCaption->setStyleSheet(
-        "color: #929DA8; font-size: 10px;"
+        "color: #929DA8;"
+        "font-size: 10px;"
     );
 
     playersInfo->addWidget(playerCount_);
@@ -194,15 +307,20 @@ MainWindow::MainWindow(QWidget* parent)
     serverLayout->addLayout(serverInfo);
     serverLayout->addStretch();
     serverLayout->addLayout(playersInfo);
+
     root->addWidget(serverCard);
 
-    auto* debugLabel = new QLabel(
-        QStringLiteral("Тестовый ответ сервера"), central
+    // Developer mode: test scenarios
+
+    debugLabel_ = new QLabel(
+        QStringLiteral("Тестовый ответ сервера"),
+        central
     );
-    debugLabel->setStyleSheet("color: #929DA8;");
-    root->addWidget(debugLabel);
+    debugLabel_->setStyleSheet("color: #929DA8;");
+    root->addWidget(debugLabel_);
 
     scenarioBox_ = new QComboBox(central);
+
     scenarioBox_->addItem(
         QStringLiteral("Всё совпадает"),
         static_cast<int>(DebugScenario::AllValid)
@@ -227,29 +345,41 @@ MainWindow::MainWindow(QWidget* parent)
         QStringLiteral("Ошибка манифеста"),
         static_cast<int>(DebugScenario::InvalidManifest)
     );
+
     root->addWidget(scenarioBox_);
+
+    // Action buttons
 
     auto* buttons = new QHBoxLayout;
     buttons->setSpacing(10);
 
     auto* checkButton = new QPushButton(
-        QStringLiteral("Проверить"), central
+        QStringLiteral("Проверить"),
+        central
     );
     auto* syncButton = new QPushButton(
-        QStringLiteral("Синхронизация"), central
+        QStringLiteral("Синхронизация"),
+        central
     );
+
     launchButton_ = new QPushButton(
-        QStringLiteral("Запуск лаунчера"), central
+        QStringLiteral("Запуск лаунчера"),
+        central
     );
+
     auto* settingsButton = new QPushButton(
-        QStringLiteral("Настройки"), central
+        QStringLiteral("Настройки"),
+        central
     );
 
     checkButton->setObjectName("primaryButton");
     launchButton_->setObjectName("primaryButton");
 
     for (auto* button : {
-             checkButton, syncButton, launchButton_, settingsButton
+             checkButton,
+             syncButton,
+             launchButton_,
+             settingsButton
          }) {
         button->setMinimumHeight(40);
         buttons->addWidget(button);
@@ -257,11 +387,16 @@ MainWindow::MainWindow(QWidget* parent)
 
     root->addLayout(buttons);
 
+    // Launcher path
+
     auto* pathCaption = new QLabel(
-        QStringLiteral("LAUNCHER"), central
+        QStringLiteral("LAUNCHER"),
+        central
     );
     pathCaption->setStyleSheet(
-        "color: #929DA8; font-size: 10px; letter-spacing: 2px;"
+        "color: #929DA8;"
+        "font-size: 10px;"
+        "letter-spacing: 2px;"
     );
 
     launcherPath_ = new QLabel(central);
@@ -274,13 +409,18 @@ MainWindow::MainWindow(QWidget* parent)
     root->addWidget(pathCaption);
     root->addWidget(launcherPath_);
 
-    auto* logCaption = new QLabel(
-        QStringLiteral("EVENT LOG"), central
+    // Developer mode: event log
+
+    logCaption_ = new QLabel(
+        QStringLiteral("EVENT LOG"),
+        central
     );
-    logCaption->setStyleSheet(
-        "color: #929DA8; font-size: 10px; letter-spacing: 2px;"
+    logCaption_->setStyleSheet(
+        "color: #929DA8;"
+        "font-size: 10px;"
+        "letter-spacing: 2px;"
     );
-    root->addWidget(logCaption);
+    root->addWidget(logCaption_);
 
     eventLog_ = new QPlainTextEdit(central);
     eventLog_->setReadOnly(true);
@@ -289,16 +429,34 @@ MainWindow::MainWindow(QWidget* parent)
         QStringLiteral("События появятся здесь...")
     );
     eventLog_->setMinimumHeight(100);
-    root->addWidget(eventLog_, 1);
+    eventLog_->setSizePolicy(
+        QSizePolicy::Expanding,
+        QSizePolicy::Expanding
+    );
 
-    setCentralWidget(central);
+   root->addWidget(eventLog_, 1);
+
+   // Свободное пространство в User Mode остаётся внизу.
+   // В Dev Mode его будет занимать журнал событий.
+   root->addStretch(0);
+
+setCentralWidget(central);
+    // Application stylesheet
 
     setStyleSheet(QStringLiteral(R"(
-        QMainWindow, QWidget {
+        QMainWindow {
             background-color: #15191E;
+        }
+
+        QWidget {
+            background-color: transparent;
             color: #F0F3F6;
             font-family: sans-serif;
             font-size: 12px;
+        }
+
+        QWidget#centralWidget {
+            background-color: transparent;
         }
 
         QComboBox, QPlainTextEdit {
@@ -340,43 +498,63 @@ MainWindow::MainWindow(QWidget* parent)
         }
     )"));
 
-    connect(checkButton, &QPushButton::clicked,
-            this, &MainWindow::validateClient);
+    // Signals
 
-    connect(syncButton, &QPushButton::clicked,
-            this, &MainWindow::synchronizeClient);
+    connect(
+        modeBox_,
+        qOverload<int>(&QComboBox::currentIndexChanged),
+        this,
+        [this](int) {
+            updateDisplayMode();
+        }
+    );
 
-    connect(launchButton_, &QPushButton::clicked,
-            this, &MainWindow::launchGame);
+    connect(
+        checkButton,
+        &QPushButton::clicked,
+        this,
+        &MainWindow::validateClient
+    );
 
-    
-    // Связываем кнопку настроек с методом openSettings().
-    // При нажатии откроется отдельное окно SettingsWindow.
-    connect(settingsButton, &QPushButton::clicked,
-            this, &MainWindow::openSettings);
+    connect(
+        syncButton,
+        &QPushButton::clicked,
+        this,
+        &MainWindow::synchronizeClient
+    );
 
-    // Читаем сохранённый путь к лаунчеру из AppSettings.
-    // MainWindow больше не обязан знать, как именно
-    // настройки хранятся на диске.
+    connect(
+        launchButton_,
+        &QPushButton::clicked,
+        this,
+        &MainWindow::launchGame
+    );
+
+    connect(
+        settingsButton,
+        &QPushButton::clicked,
+        this,
+        &MainWindow::openSettings
+    );
+
+    // Load settings
+
     const QString savedPath = AppSettings::launcherPath();
 
-    // Показываем путь в главном окне.
-    // Если пользователь ещё ничего не выбрал,
-    // показываем понятную надпись вместо пустого поля.
     launcherPath_->setText(
         savedPath.isEmpty()
             ? QStringLiteral("Лаунчер не выбран")
             : savedPath
     );
 
-    // Обновляем доступность кнопки запуска с учётом
-    // текущего состояния валидации.
     updateLaunchButton();
 
-    // Записываем стартовое событие в журнал.
-    appendLog(QStringLiteral("Валидатор запущен в режиме DEBUG."));
+    appendLog(QStringLiteral("Валидатор запущен."));
+    updateDisplayMode();
 }
-// Validate Cli 
+
+// Client validation
+
 void MainWindow::validateClient()
 {
     const auto scenario = static_cast<DebugScenario>(
@@ -384,6 +562,7 @@ void MainWindow::validateClient()
     );
 
     const auto result = serverClient_.fetchManifest(scenario);
+
     applyResult(result);
 
     appendLog(
@@ -396,6 +575,8 @@ void MainWindow::validateClient()
     }
 }
 
+// Client synchronization
+
 void MainWindow::synchronizeClient()
 {
     const auto scenario = static_cast<DebugScenario>(
@@ -407,10 +588,14 @@ void MainWindow::synchronizeClient()
     if (!result.serverOnline ||
         result.status == ValidationStatus::ManifestError) {
         applyResult(result);
+
         appendLog(
-            QStringLiteral("Синхронизация отменена: сервер недоступен "
-                           "или манифест некорректен.")
+            QStringLiteral(
+                "Синхронизация отменена: сервер недоступен "
+                "или манифест некорректен."
+            )
         );
+
         return;
     }
 
@@ -420,33 +605,42 @@ void MainWindow::synchronizeClient()
         return;
     }
 
-    // Заглушка: реального скачивания и изменения файлов пока нет.
     appendLog(
-        QStringLiteral("DEBUG: имитация синхронизации. "
-                       "Файлы на диске не изменялись.")
+        QStringLiteral(
+            "DEBUG: имитация синхронизации. "
+            "Файлы на диске не изменялись."
+        )
     );
 
     auto simulated = result;
     simulated.status = ValidationStatus::Sync;
-    simulated.message =
-        QStringLiteral("Тестовая синхронизация завершена. "
-                       "Реальные файлы не изменялись.");
+    simulated.message = QStringLiteral(
+        "Тестовая синхронизация завершена. "
+        "Реальные файлы не изменялись."
+    );
     simulated.details.clear();
 
     applyResult(simulated);
-    appendLog(QStringLiteral("DEBUG: клиент условно синхронизирован."));
+
+    appendLog(
+        QStringLiteral("DEBUG: клиент условно синхронизирован.")
+    );
 }
+
+// Launcher
 
 void MainWindow::launchGame()
 {
-    // Получаем путь к лаунчеру через единый интерфейс настроек.
     const QString path = AppSettings::launcherPath();
+
     if (path.isEmpty()) {
         QMessageBox::warning(
             this,
             QStringLiteral("Лаунчер не настроен"),
-            QStringLiteral("Сначала укажите путь к лаунчеру "
-                           "в настройках.")
+            QStringLiteral(
+                "Сначала укажите путь к лаунчеру "
+                "в настройках."
+            )
         );
         return;
     }
@@ -457,9 +651,15 @@ void MainWindow::launchGame()
         QMessageBox::warning(
             this,
             QStringLiteral("Файл не найден"),
-            QStringLiteral("Указанный исполняемый файл не существует.")
+            QStringLiteral(
+                "Указанный исполняемый файл не существует."
+            )
         );
-        appendLog(QStringLiteral("Ошибка: лаунчер не найден: %1").arg(path));
+
+        appendLog(
+            QStringLiteral("Ошибка: лаунчер не найден: %1")
+                .arg(path)
+        );
         return;
     }
 
@@ -467,9 +667,15 @@ void MainWindow::launchGame()
         QMessageBox::warning(
             this,
             QStringLiteral("Нет прав на запуск"),
-            QStringLiteral("Файл не помечен как исполняемый.")
+            QStringLiteral(
+                "Файл не помечен как исполняемый."
+            )
         );
-        appendLog(QStringLiteral("Ошибка: файл не исполняемый: %1").arg(path));
+
+        appendLog(
+            QStringLiteral("Ошибка: файл не исполняемый: %1")
+                .arg(path)
+        );
         return;
     }
 
@@ -478,72 +684,87 @@ void MainWindow::launchGame()
         QMessageBox::warning(
             this,
             QStringLiteral("Проверка не пройдена"),
-            QStringLiteral("Сначала проверьте клиент и устраните "
-                           "обязательные ошибки синхронизации.")
+            QStringLiteral(
+                "Сначала проверьте клиент и устраните "
+                "обязательные ошибки синхронизации."
+            )
         );
         return;
     }
 
-    QString error;
     QProcess process;
     process.setProgram(path);
     process.setArguments({});
 
+    QString error;
+
     if (!process.startDetached()) {
         error = process.errorString();
+
         QMessageBox::critical(
             this,
             QStringLiteral("Ошибка запуска"),
-            QStringLiteral("Не удалось запустить лаунчер:\n%1").arg(error)
+            QStringLiteral(
+                "Не удалось запустить лаунчер:\n%1"
+            ).arg(error)
         );
-        appendLog(QStringLiteral("Ошибка запуска: %1").arg(error));
+
+        appendLog(
+            QStringLiteral("Ошибка запуска: %1").arg(error)
+        );
         return;
     }
 
-    appendLog(QStringLiteral("Лаунчер запущен: %1").arg(path));
+    appendLog(
+        QStringLiteral("Лаунчер запущен: %1").arg(path)
+    );
+
     close();
 }
 
+// Settings
 
 void MainWindow::openSettings()
 {
-    // Создаём отдельное окно настроек.
-    // Передаём this, чтобы оно принадлежало главному окну.
     SettingsWindow dialog(this);
 
-    // exec() открывает модальный диалог и ждёт,
-    // пока пользователь сохранит настройки или отменит изменения.
     const int result = dialog.exec();
 
-    // Если пользователь нажал Cancel или закрыл окно,
-    // ничего в главном окне не меняем.
     if (result != QDialog::Accepted) {
         return;
     }
 
-    // SettingsWindow уже сохранил значения через AppSettings.
-    // Повторно читаем путь, чтобы обновить отображение.
     const QString path = AppSettings::launcherPath();
 
-    // Обновляем надпись LAUNCHER в главном окне.
     launcherPath_->setText(
         path.isEmpty()
             ? QStringLiteral("Лаунчер не выбран")
             : path
     );
 
-    // Сообщаем в журнале, что настройки сохранены.
     appendLog(QStringLiteral("Настройки сохранены."));
 }
+
+// Apply validation result
 
 void MainWindow::applyResult(const ValidationResult& result)
 {
     lastResult_ = result;
 
     statusTitle_->setText(statusName(result.status));
+
     statusTitle_->setStyleSheet(
         QStringLiteral(
-            "font-size: 25px; font-weight: bold; color: %1;"
+            "font-size: 15px;"
+            "font-weight: bold;"
+            "color: %1;"
+        ).arg(statusColor(result.status))
+    );
+
+    statusIndicator_->setStyleSheet(
+        QStringLiteral(
+            "background-color: %1;"
+            "border-radius: 5px;"
         ).arg(statusColor(result.status))
     );
 
@@ -553,7 +774,8 @@ void MainWindow::applyResult(const ValidationResult& result)
         serverStatus_->setText(QStringLiteral("Online"));
         serverStatus_->setStyleSheet("color: #55D98A;");
 
-        if (result.onlinePlayers >= 0 && result.maxPlayers >= 0) {
+        if (result.onlinePlayers >= 0 &&
+            result.maxPlayers >= 0) {
             playerCount_->setText(
                 QStringLiteral("%1 / %2")
                     .arg(result.onlinePlayers)
@@ -568,6 +790,7 @@ void MainWindow::applyResult(const ValidationResult& result)
                 ? QStringLiteral("Не проверен")
                 : QStringLiteral("Offline")
         );
+
         serverStatus_->setStyleSheet("color: #FF626B;");
         playerCount_->setText(QStringLiteral("—"));
     }
@@ -575,16 +798,21 @@ void MainWindow::applyResult(const ValidationResult& result)
     updateLaunchButton();
 }
 
+// Event log
+
 void MainWindow::appendLog(const QString& message)
 {
-    const QString time = QDateTime::currentDateTime().toString(
-        QStringLiteral("HH:mm:ss")
-    );
+    const QString time =
+        QDateTime::currentDateTime().toString(
+            QStringLiteral("HH:mm:ss")
+        );
 
     eventLog_->appendPlainText(
         QStringLiteral("[%1] %2").arg(time, message)
     );
 }
+
+// Launch button state
 
 void MainWindow::updateLaunchButton()
 {
@@ -593,5 +821,36 @@ void MainWindow::updateLaunchButton()
         lastResult_.status == ValidationStatus::ExtraMods;
 
     launchButton_->setEnabled(canLaunch);
+}
+
+// Display mode
+
+void MainWindow::updateDisplayMode()
+{
+    const bool devMode = modeBox_->currentIndex() == 1;
+
+    debugLabel_->setVisible(devMode);
+    scenarioBox_->setVisible(devMode);
+    logCaption_->setVisible(devMode);
+    eventLog_->setVisible(devMode);
+
+    if (auto* layout =
+            qobject_cast<QVBoxLayout*>(centralWidget()->layout())) {
+        const int logIndex = layout->indexOf(eventLog_);
+        const int spacerIndex = layout->count() - 1;
+
+        // Dev Mode: свободная высота достаётся журналу.
+        // User Mode: свободная высота уходит в нижний отступ.
+        if (logIndex >= 0) {
+            layout->setStretch(logIndex, devMode ? 1 : 0);
+        }
+
+        if (spacerIndex >= 0) {
+            layout->setStretch(spacerIndex, devMode ? 0 : 1);
+        }
+
+        layout->invalidate();
+        layout->activate();
+    }
 }
 

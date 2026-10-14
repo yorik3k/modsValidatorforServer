@@ -23,8 +23,12 @@ qt_standard_project_setup()
 
 
 qt_add_executable(cli-srv-validator
+    
+    resources/resources.qrc
+
     # Точка входа приложения.
     src/main.cpp
+
 
     # Состояния и результаты валидации.
     src/core/ValidationState.hpp
