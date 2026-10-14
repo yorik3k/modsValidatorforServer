@@ -1,0 +1,15 @@
+# CMake / Ninja build
+/build/
+/cmake-build-*/
+
+# IDE
+/.idea/
+.vscode/
+*.user
+
+# Compiled artifacts
+*.o
+*.a
+*.so
+*.dll
+*.exe
